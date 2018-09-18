@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS security service with threat intelligence
+Parameters:
+  LogLevel: 
+    Type: String
+    Default: error
+    AllowedValues: 
+      - debug
+      - info
+      - warning
+      - error
+    Description: Enter debug, info, warning or error. Default is error.
+
+  ThreatIntelligenceName:
+    Type: String
+    Default: alienvault
+    Description: Enter name of threat intelligence source. Default is alienvault.
+
+  ThreatIntelligenceUrl:
+    Type: String
+    Default: https://reputation.alienvault.com/reputation.data
+    Description: Enter url of threat intelligence source. Default is alienvault's url.
+
+  ThreatIntelligenceFrequence:
+    Type: String
+    Default: one hour
+    Description: Enter update frequence of intelligence source in cloudwatch event rate format. Default is one hour.
+
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Threat intelligence configuration"
+        Parameters: 
+          - ThreatIntelligenceName
+          - ThreatIntelligenceUrl
+          - ThreatIntelligenceFrequence
+      - 
+        Label: 
+          default: "Lambda configuration"
+        Parameters: 
+          - LogLevel
+
+Resources:
+  CWEventRule: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "Trigger lambda to get threat intelligence feed."
+      ScheduleExpression: !Sub
+        - rate(${Frequence})
+        - { Frequence: !Ref ThreatIntelligenceFrequence }
+      State: "ENABLED"
+      Targets:
+        - 
+          Arn: 
+            Fn::GetAtt: 
+              - "GetTiLambda"
+              - "Arn"
+          Input: !Sub
+            - {"name": ${name}, "url": ${url}}
+            - { name: !Ref ThreatIntelligenceName }
+            - { url: !Ref ThreatIntelligenceUrl }
+
+  PermissionForEventsToInvokeLambda: 
+  Type: AWS::Lambda::Permission
+  Properties: 
+    FunctionName: 
+      Ref: "LambdaFunction"
+    Action: "lambda:InvokeFunction"
+    Principal: "events.amazonaws.com"
+    SourceArn: 
+      Fn::GetAtt: 
+        - "CWEventRule"
+        - "Arn"
+
+  GetTiLambda: 
+  Type: "AWS::Lambda::Function"
+  Properties: 
+    Handler: "get_ti.lambda_handler"
+    Role: 
+      Fn::GetAtt: 
+        - "GetTiRole"
+        - "Arn"
+    Code: 
+      S3Bucket: "lambda-functions"
+      S3Key: "amilookup.zip"
+    Runtime: "nodejs4.3"
+    Timeout: 25

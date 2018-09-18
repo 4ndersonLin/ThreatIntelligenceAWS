@@ -15,7 +15,6 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.vendored import requests
 
-s3_bucket_name = os.environ['S3_BUCKET_NAME']
 log_level = os.environ['LOG_LEVEL']
 
 logger = logger
