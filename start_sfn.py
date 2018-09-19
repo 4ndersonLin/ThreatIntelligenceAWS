@@ -1,6 +1,6 @@
 # IAM role permission requirement:
 # * lambda basic excution policy
-# * sfn:start_execution
+# * sfn:StartExecution
 
 import json
 import os

@@ -1,9 +1,9 @@
 # IAM role permission requirement:
 # * lambda basic excution policy
 # * s3:GetObject
-# * waf:get_ip_set
-# * waf:get_change_token
-# * waf:update_ip_set
+# * waf:GetIpSet
+# * waf:GetChangeToken
+# * waf:UpdateIpSet
 
 import os
 import io
