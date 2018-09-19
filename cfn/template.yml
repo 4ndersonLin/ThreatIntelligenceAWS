@@ -10,6 +10,10 @@ Parameters:
       - warning
       - error
     Description: Enter debug, info, warning or error. Default is error.
+  
+  LambdaS3Bucket:
+    Type: String
+    Description: Enter name of S3 bucket which put lambda source code ready.
 
   ThreatIntelligenceName:
     Type: String
@@ -64,27 +68,315 @@ Resources:
             - { url: !Ref ThreatIntelligenceUrl }
 
   PermissionForEventsToInvokeLambda: 
-  Type: AWS::Lambda::Permission
-  Properties: 
-    FunctionName: 
-      Ref: "LambdaFunction"
-    Action: "lambda:InvokeFunction"
-    Principal: "events.amazonaws.com"
-    SourceArn: 
-      Fn::GetAtt: 
-        - "CWEventRule"
-        - "Arn"
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "LambdaFunction"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: 
+        Fn::GetAtt: 
+          - "CWEventRule"
+          - "Arn"
 
+  TiS3Bucket:
+    Type: AWS::S3::Bucket
+
+  WAFIpSet1:
+    Type: "AWS::WAF::IPSet"
+    Properties: 
+      Name: "TI WAF IP set #1"
+
+  WAFIpSet2:
+    Type: "AWS::WAF::IPSet"
+    Properties: 
+      Name: "TI WAF IP set #2"
+
+  BasicExceutionPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: "LambdaBasic"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          Effect: "Allow"
+          Action: 
+            - 
+              "logs:CreateLogGroup"
+              "logs:CreateLogStream"
+              "logs:PutLogEvents"
+          Resource: "arn:aws:logs:*:*:*"
+      Roles: 
+        - 
+          Ref: "GetTiRole"
+          Ref: "StartSfnRole"
+          Ref: "UpdateWAFTiRole"
+          Ref: "UpdateGDTiRole"
+
+  GetTiS3ObjPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: "GetTiObj"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          Effect: "Allow"
+          Action: "s3:GetObject"
+          Resource: !Sub
+            - ${TiS3Arn}/*
+            - { 
+                TiS3Arn: 
+                    {
+                      Fn::GetAtt: 
+                      - "UpdateWAFTiLambda"
+                      - "Arn" 
+                    }
+              }
+        Roles: 
+          - 
+            Ref: "UpdateWAFTiRole"
+            Ref: "UpdateGDTiRole"
+
+  PutTiS3ObjPolicy:
+    Type: AWS::IAM::Policy
+      PolicyName: "PuttTiObj"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          Effect: "Allow"
+          Action: "s3:PutObject"
+          Resource: !Sub
+            - ${TiS3Arn}/*
+            - { 
+                TiS3Arn: 
+                    {
+                      Fn::GetAtt: 
+                      - "UpdateWAFTiLambda"
+                      - "Arn" 
+                    }
+              }
+          Roles: 
+            - 
+              Ref: "GetTiRole"
+  
+  StartSfnPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: "UpdateGD"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          Effect: "Allow"
+          Action: "sfn:StartExecution"
+          Resource: "*"
+      Roles: 
+        - 
+          Ref: "StartSfnRole"
+
+  UpdateGDPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: "UpdateGD"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          Effect: "Allow"
+          Action: 
+            -
+              waf:GetIpSet
+              waf:GetChangeToken
+              waf:UpdateIpSet
+          Resource: "*"
+      Roles: 
+        - 
+          Ref: "UpdateGDTiRole"
+
+  UpdateWAFPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: "UpdateWAF"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Effect: "Allow"
+            Action: 
+              -
+                guardduty:Get*
+                guardduty:List*
+                guardduty:CreateThreatIntelSet
+                guardduty:UpdateThreatIntelSet
+            Resource: "*"
+          -
+            Effect: "Allow"
+            Action: 
+              -
+                iam:PutRolePolicy
+                iam:DeleteRolePolicy
+            Resource: "arn:aws:iam:::role/aws-service-role/guardduty.amazonaws.com/AWSServiceRoleForAmazonGuardDuty"
+      Roles: 
+        - 
+          Ref: "UpdateGDTiRole"
+
+
+  UpdateSfn:
+    Type: "AWS::StepFunctions::StateMachine"
+    Properties:
+      DefinitionString: !Sub
+        - {
+            "name": ${},
+            "url": ${url}
+          }
+        - { 
+          WafLambdaArn: 
+              {
+                Fn::GetAtt: 
+                - "UpdateWAFTiLambda"
+                - "Arn" 
+              }
+          }
+        - { 
+          GdLambdaArn: 
+              {
+                Fn::GetAtt: 
+                - "UpdateGDTiLambda"
+                - "Arn" 
+              }
+          }
+      RoleArn: 
+        Fn::GetAtt: 
+          - "UpdateSfnRole"
+          - "Arn"
+  
+  GetTiRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+
+  StartSfnRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+  
+  UpdateWAFTiRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+  
+  UpdateGDTiRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Allow"
+            Principal: 
+              Service: 
+                - "lambda.amazonaws.com"
+            Action: 
+              - "sts:AssumeRole"
+      Path: "/"
+  
   GetTiLambda: 
-  Type: "AWS::Lambda::Function"
-  Properties: 
-    Handler: "get_ti.lambda_handler"
-    Role: 
-      Fn::GetAtt: 
-        - "GetTiRole"
-        - "Arn"
-    Code: 
-      S3Bucket: "lambda-functions"
-      S3Key: "amilookup.zip"
-    Runtime: "nodejs4.3"
-    Timeout: 25
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      Handler: "get_ti.lambda_handler"
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref TiS3Bucket
+          LOG_LEVEL: !Ref LogLevel
+      Role: 
+        Fn::GetAtt: 
+          - "GetTiRole"
+          - "Arn"
+      Code: 
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: "get_ti.zip"
+      Runtime: "python3.6"
+      Timeout: 30
+    DependsOn: TiS3Bucket
+
+  StartSfnLambda: 
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      Handler: "start_sfn.lambda_handler"
+      Environment:
+        Variables:
+          SFN_ARN: !Ref UpdateSfn
+          LOG_LEVEL: !Ref LogLevel
+      Role: 
+        Fn::GetAtt: 
+          - "StartSfnRole"
+          - "Arn"
+      Code: 
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: "start_sfn.zip"
+      Runtime: "python3.6"
+      Timeout: 30
+
+  UpdateWAFTiLambda: 
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      Handler: "update_waf_ti.lambda_handler"
+      Environment:
+        Variables:
+          IP_SET1: !Ref WAFIpSet1
+          IP_SET2: !Ref WAFIpSet2
+          LOG_LEVEL: !Ref LogLevel
+      Role: 
+        Fn::GetAtt: 
+          - "UpdateWAFTiRole"
+          - "Arn"
+      Code: 
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: "update_waf_ti.zip"
+      Runtime: "python3.6"
+      Timeout: 300
+  
+  UpdateGDTiLambda: 
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      Handler: "update_gd_ti.lambda_handler"
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      Role: 
+        Fn::GetAtt: 
+          - "UpdateGDTiRole"
+          - "Arn"
+      Code: 
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: "update_gd_ti.zip"
+      Runtime: "python3.6"
+      Timeout: 30
