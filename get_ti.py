@@ -1,6 +1,6 @@
 # IAM role permission requirement:
 # * lambda basic excution policy
-# * s3:put_object
+# * s3:PutObject
 
 import os
 import re
