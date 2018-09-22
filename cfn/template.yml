@@ -15,6 +15,10 @@ Parameters:
     Type: String
     Description: Enter name of S3 bucket which put lambda source code ready.
 
+  ThreatIntelligenceS3Bucket:
+    Type: String
+    Description: Enter name of S3 bucket for place TI file.
+
   ThreatIntelligenceName:
     Type: String
     Default: alienvault
@@ -27,8 +31,8 @@ Parameters:
 
   ThreatIntelligenceFrequence:
     Type: String
-    Default: one hour
-    Description: Enter update frequence of intelligence source in cloudwatch event rate format. Default is one hour.
+    Default: 1 hour
+    Description: Enter update frequence of intelligence source in cloudwatch event rate format. Default is 1 hour.
 
 
 Metadata: 
@@ -58,29 +62,41 @@ Resources:
       State: "ENABLED"
       Targets:
         - 
-          Arn: 
-            Fn::GetAtt: 
-              - "GetTiLambda"
-              - "Arn"
-          Input: !Sub
-            - {"name": ${name}, "url": ${url}}
-            - { name: !Ref ThreatIntelligenceName }
-            - { url: !Ref ThreatIntelligenceUrl }
+          Arn: !GetAtt GetTiLambda.Arn
+          Input: !Sub '{"name": "${ThreatIntelligenceName}","url": "${ThreatIntelligenceUrl}"}'
+          Id: "LambdaFunctionV1"
 
   PermissionForEventsToInvokeLambda: 
     Type: AWS::Lambda::Permission
     Properties: 
       FunctionName: 
-        Ref: "LambdaFunction"
+        Ref: "GetTiLambda"
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
-      SourceArn: 
-        Fn::GetAtt: 
-          - "CWEventRule"
-          - "Arn"
+      SourceArn: !GetAtt CWEventRule.Arn
 
   TiS3Bucket:
     Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Ref ThreatIntelligenceS3Bucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt StartSfnLambda.Arn
+    DependsOn: 
+      - "StartSfnLambda"
+      - "PermissionForS3ToInvokeLambda"
+
+  PermissionForS3ToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: "StartSfnLambda"
+      Action: "lambda:InvokeFunction"
+      Principal: "s3.amazonaws.com"
+      SourceArn: !Sub arn:aws:s3:::${ThreatIntelligenceS3Bucket}
+    DependsOn: 
+      - "StartSfnLambda"
 
   WAFIpSet1:
     Type: "AWS::WAF::IPSet"
@@ -93,160 +109,159 @@ Resources:
       Name: "TI WAF IP set #2"
 
   BasicExceutionPolicy:
-    Type: AWS::IAM::Policy
+    Type: AWS::IAM::ManagedPolicy
     Properties: 
-      PolicyName: "LambdaBasic"
-      PolicyDocument: 
-        Version: "2012-10-17"
-        Statement: 
-          Effect: "Allow"
-          Action: 
-            - 
-              "logs:CreateLogGroup"
-              "logs:CreateLogStream"
-              "logs:PutLogEvents"
-          Resource: "arn:aws:logs:*:*:*"
-      Roles: 
-        - 
-          Ref: "GetTiRole"
-          Ref: "StartSfnRole"
-          Ref: "UpdateWAFTiRole"
-          Ref: "UpdateGDTiRole"
-
-  GetTiS3ObjPolicy:
-    Type: AWS::IAM::Policy
-    Properties: 
-      PolicyName: "GetTiObj"
-      PolicyDocument: 
-        Version: "2012-10-17"
-        Statement: 
-          Effect: "Allow"
-          Action: "s3:GetObject"
-          Resource: !Sub
-            - ${TiS3Arn}/*
-            - { 
-                TiS3Arn: 
-                    {
-                      Fn::GetAtt: 
-                      - "UpdateWAFTiLambda"
-                      - "Arn" 
-                    }
-              }
-        Roles: 
-          - 
-            Ref: "UpdateWAFTiRole"
-            Ref: "UpdateGDTiRole"
-
-  PutTiS3ObjPolicy:
-    Type: AWS::IAM::Policy
-      PolicyName: "PuttTiObj"
-      PolicyDocument: 
-        Version: "2012-10-17"
-        Statement: 
-          Effect: "Allow"
-          Action: "s3:PutObject"
-          Resource: !Sub
-            - ${TiS3Arn}/*
-            - { 
-                TiS3Arn: 
-                    {
-                      Fn::GetAtt: 
-                      - "UpdateWAFTiLambda"
-                      - "Arn" 
-                    }
-              }
-          Roles: 
-            - 
-              Ref: "GetTiRole"
-  
-  StartSfnPolicy:
-    Type: AWS::IAM::Policy
-    Properties: 
-      PolicyName: "UpdateGD"
-      PolicyDocument: 
-        Version: "2012-10-17"
-        Statement: 
-          Effect: "Allow"
-          Action: "sfn:StartExecution"
-          Resource: "*"
-      Roles: 
-        - 
-          Ref: "StartSfnRole"
-
-  UpdateGDPolicy:
-    Type: AWS::IAM::Policy
-    Properties: 
-      PolicyName: "UpdateGD"
-      PolicyDocument: 
-        Version: "2012-10-17"
-        Statement: 
-          Effect: "Allow"
-          Action: 
-            -
-              waf:GetIpSet
-              waf:GetChangeToken
-              waf:UpdateIpSet
-          Resource: "*"
-      Roles: 
-        - 
-          Ref: "UpdateGDTiRole"
-
-  UpdateWAFPolicy:
-    Type: AWS::IAM::Policy
-    Properties: 
-      PolicyName: "UpdateWAF"
       PolicyDocument: 
         Version: "2012-10-17"
         Statement: 
           -
             Effect: "Allow"
             Action: 
-              -
-                guardduty:Get*
-                guardduty:List*
-                guardduty:CreateThreatIntelSet
-                guardduty:UpdateThreatIntelSet
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "arn:aws:logs:*:*:*"
+      Roles: 
+        - Ref: "GetTiRole"
+        - Ref: "StartSfnRole"
+        - Ref: "UpdateWAFTiRole"
+        - Ref: "UpdateGDTiRole"
+    DependsOn: 
+      - GetTiRole
+      - StartSfnRole
+      - UpdateWAFTiRole
+      - UpdateGDTiRole
+
+  GetTiS3ObjPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Effect: "Allow"
+            Action: "s3:GetObject"
+            Resource: !Sub ${TiS3Bucket.Arn}/*
+      Roles: 
+        - Ref: "UpdateWAFTiRole"
+        - Ref: "UpdateGDTiRole"
+    DependsOn: 
+      - UpdateWAFTiRole
+      - UpdateGDTiRole
+
+  PutTiS3ObjPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Effect: "Allow"
+            Action: "s3:PutObject"
+            Resource: !Sub ${TiS3Bucket.Arn}/*
+      Roles: 
+        - Ref: "GetTiRole"
+    DependsOn: "GetTiRole"
+  
+  StartSfnPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Effect: "Allow"
+            Action: "states:StartExecution"
+            Resource: "*"
+      Roles: 
+        - Ref: "StartSfnRole"
+    DependsOn: "StartSfnRole"
+
+  UpdateGDPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Effect: "Allow"
+            Action: 
+              - waf:GetIpSet
+              - waf:GetChangeToken
+              - waf:UpdateIpSet
+            Resource: "*"
+      Roles: 
+        - Ref: "UpdateGDTiRole"
+    DependsOn: "UpdateGDTiRole"
+
+  UpdateWAFPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          -
+            Effect: "Allow"
+            Action: 
+              - guardduty:Get*
+              - guardduty:List*
+              - guardduty:CreateThreatIntelSet
+              - guardduty:UpdateThreatIntelSet
             Resource: "*"
           -
             Effect: "Allow"
             Action: 
-              -
-                iam:PutRolePolicy
-                iam:DeleteRolePolicy
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
             Resource: "arn:aws:iam:::role/aws-service-role/guardduty.amazonaws.com/AWSServiceRoleForAmazonGuardDuty"
       Roles: 
-        - 
-          Ref: "UpdateGDTiRole"
+        - Ref: "UpdateWAFTiRole"
+    DependsOn: "UpdateWAFTiRole"
 
 
   UpdateSfn:
     Type: "AWS::StepFunctions::StateMachine"
     Properties:
       DefinitionString: !Sub
-        - {
-            "name": ${},
-            "url": ${url}
-          }
-        - { 
-          WafLambdaArn: 
-              {
-                Fn::GetAtt: 
-                - "UpdateWAFTiLambda"
-                - "Arn" 
+        - |
+          {
+            "Comment": "Parallel update ti.",
+            "StartAt": "UpdateTi",
+            "States": {
+              "UpdateTi": {
+                "Type": "Parallel",
+                "End": true,
+                "Branches": [
+                  {
+                   "StartAt": "UpdateWAF",
+                   "States": {
+                     "UpdateWAF": {
+                       "Type": "Task",
+                       "Resource":
+                         "${UpdateWAFTiLambdaArn}",
+                       "End": true
+                     }
+                   }
+                 },
+                 {
+                   "StartAt": "UpdateGD",
+                   "States": {
+                     "UpdateGD": {
+                       "Type": "Task",
+                       "Resource":
+                         "${UpdateGDTiLambdaArn}",
+                       "End": true
+                     }
+                   }
+                 }
+                ]
               }
+            }
           }
-        - { 
-          GdLambdaArn: 
-              {
-                Fn::GetAtt: 
-                - "UpdateGDTiLambda"
-                - "Arn" 
-              }
-          }
-      RoleArn: 
-        Fn::GetAtt: 
-          - "UpdateSfnRole"
-          - "Arn"
+        - {UpdateWAFTiLambdaArn: !GetAtt UpdateWAFTiLambda.Arn, UpdateGDTiLambdaArn: !GetAtt UpdateGDTiLambda.Arn}
+
+
+      RoleArn: "arn:aws:iam::064540839264:role/service-role/StatesExecutionRole-ap-northeast-1"
   
   GetTiRole:
     Type: "AWS::IAM::Role"
@@ -316,10 +331,7 @@ Resources:
         Variables:
           S3_BUCKET_NAME: !Ref TiS3Bucket
           LOG_LEVEL: !Ref LogLevel
-      Role: 
-        Fn::GetAtt: 
-          - "GetTiRole"
-          - "Arn"
+      Role: !GetAtt GetTiRole.Arn
       Code: 
         S3Bucket: !Ref LambdaS3Bucket
         S3Key: "get_ti.zip"
@@ -335,10 +347,7 @@ Resources:
         Variables:
           SFN_ARN: !Ref UpdateSfn
           LOG_LEVEL: !Ref LogLevel
-      Role: 
-        Fn::GetAtt: 
-          - "StartSfnRole"
-          - "Arn"
+      Role: !GetAtt StartSfnRole.Arn
       Code: 
         S3Bucket: !Ref LambdaS3Bucket
         S3Key: "start_sfn.zip"
@@ -354,10 +363,7 @@ Resources:
           IP_SET1: !Ref WAFIpSet1
           IP_SET2: !Ref WAFIpSet2
           LOG_LEVEL: !Ref LogLevel
-      Role: 
-        Fn::GetAtt: 
-          - "UpdateWAFTiRole"
-          - "Arn"
+      Role: !GetAtt UpdateWAFTiRole.Arn
       Code: 
         S3Bucket: !Ref LambdaS3Bucket
         S3Key: "update_waf_ti.zip"
@@ -371,10 +377,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-      Role: 
-        Fn::GetAtt: 
-          - "UpdateGDTiRole"
-          - "Arn"
+      Role: !GetAtt UpdateGDTiRole.Arn
       Code: 
         S3Bucket: !Ref LambdaS3Bucket
         S3Key: "update_gd_ti.zip"

@@ -6,6 +6,7 @@ import json
 import os
 import boto3
 import logging
+from botocore.exceptions import ClientError
 
 sfn_arn = os.environ['SFN_ARN']
 log_level = os.environ['LOG_LEVEL'].upper()
