@@ -45,11 +45,13 @@ Metadata:
           - ThreatIntelligenceName
           - ThreatIntelligenceUrl
           - ThreatIntelligenceFrequence
+          - ThreatIntelligenceS3Bucket
       - 
         Label: 
           default: "Lambda configuration"
         Parameters: 
           - LogLevel
+          - LambdaS3Bucket
 
 Resources:
   CWEventRule: 
@@ -177,7 +179,7 @@ Resources:
         - Ref: "StartSfnRole"
     DependsOn: "StartSfnRole"
 
-  UpdateGDPolicy:
+  UpdateWAFPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties: 
       PolicyDocument: 
@@ -191,10 +193,10 @@ Resources:
               - waf:UpdateIpSet
             Resource: "*"
       Roles: 
-        - Ref: "UpdateGDTiRole"
-    DependsOn: "UpdateGDTiRole"
+        - Ref: "UpdateWAFTiRole"
+    DependsOn: "UpdateWAFTiRole"
 
-  UpdateWAFPolicy:
+  UpdateGDPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties: 
       PolicyDocument: 
@@ -215,8 +217,8 @@ Resources:
               - iam:DeleteRolePolicy
             Resource: "arn:aws:iam:::role/aws-service-role/guardduty.amazonaws.com/AWSServiceRoleForAmazonGuardDuty"
       Roles: 
-        - Ref: "UpdateWAFTiRole"
-    DependsOn: "UpdateWAFTiRole"
+        - Ref: "UpdateGDTiRole"
+    DependsOn: "UpdateGDTiRole"
 
 
   UpdateSfn:

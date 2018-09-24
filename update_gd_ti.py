@@ -17,7 +17,7 @@ from botocore.vendored import requests
 
 log_level = os.environ['LOG_LEVEL']
 
-logger = logger
+logger = logging.getLogger()
 logger.setLevel(log_level)
 
 s3 = boto3.client('s3')
